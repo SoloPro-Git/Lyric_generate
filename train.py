@@ -31,7 +31,8 @@ def setup_train_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--device', default='0,1', type=str, required=False, help='设置使用哪些显卡')
     parser.add_argument('--no_cuda', action='store_true', help='不使用GPU进行训练')
-    parser.add_argument('--model_config', default='chinese-lyric-gpt-pretrain-model/config.json', type=str, required=False,
+    parser.add_argument('--model_config', default='chinese-lyric-gpt-pretrain-model/config.json', type=str,
+                        required=False,
                         help='选择模型参数')
     parser.add_argument('--vocab_path', default='vocab/vocab.txt', type=str, required=False, help='选择词库')
     parser.add_argument('--train_raw_path', default='data/train_Jay.json', type=str, required=False, help='原始训练语料')
@@ -49,7 +50,8 @@ def setup_train_args():
     parser.add_argument('--max_grad_norm', default=1.0, type=float, required=False)
     parser.add_argument('--lyric_model_output_path', default='lyric_model/', type=str, required=False,
                         help='歌词模型输出路径')
-    parser.add_argument('--pretrained_model', default='chinese-lyric-gpt-pretrain-model/', type=str, required=False, help='预训练的GPT2模型的路径')
+    parser.add_argument('--pretrained_model', default='chinese-lyric-gpt-pretrain-model/', type=str, required=False,
+                        help='预训练的GPT2模型的路径')
     parser.add_argument('--writer_dir', default='tensorboard_summary/', type=str, required=False, help='Tensorboard路径')
     parser.add_argument('--seed', type=int, default=None, help='设置种子用于生成随机数，以使得训练的结果是确定的')
     parser.add_argument('--num_workers', type=int, default=1, help="dataloader加载数据时使用的线程数量")
@@ -120,9 +122,9 @@ def create_model(args, vocab_size):
     return model, model.config.to_dict().get("n_ctx")
 
 
-def preprocess_raw_data(args, tokenizer, n_ctx):
+def preprocess_raw_data(args, tokenizer, n_ctx, remember_lyric_len=3):
     """
-    对原始语料进行处理，将原始语料转换为用于train的token id，对于每个dialogue，将其处于成如下形式"[CLS]utterance1[SEP]utterance2[SEP]utterance3[SEP]"
+    对原始语料进行处理，将原始语料转换为用于train的token id，对于每首歌曲，将其处于成如下形式"[CLS]题目[SEP]句1[SEP]句2[SEP]句3[SEP]···"
     :param args:
     :param tokenizer:
     :param n_ctx:GPT2模型的上下文窗口大小,对于超过n_ctx(n_ctx包括了特殊字符)的dialogue进行截断
@@ -132,7 +134,7 @@ def preprocess_raw_data(args, tokenizer, n_ctx):
                                                                                     args.train_tokenized_path))
     with open(args.train_raw_path, 'rb') as f:
         data = f.read().decode("utf-8")
-    if "\r\n" in data:
+    if "-------\r\n" in data:
         train_data = data.split("\r\n\r\n")
     else:
         train_data = data.split("\n\n")
@@ -426,7 +428,7 @@ def main():
     data_list = data.split("\n")
     train_list, test_list = train_test_split(data_list, test_size=0.2, random_state=1)
     # 开始训练
-    # train(model, device, train_list, multi_gpu, args)
+    train(model, device, train_list, multi_gpu, args)
     # 测试模型
     evaluate(model, device, test_list, multi_gpu, args)
 
