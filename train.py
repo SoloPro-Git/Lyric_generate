@@ -323,7 +323,7 @@ def train(model, device, train_list, multi_gpu, args):
         if args.train_mmi:  # 当前训练MMI模型
             model_path = join(args.mmi_model_output_path, 'model_epoch{}'.format(epoch + 1))
         else:  # 当前训练对话模型
-            model_path = join(args.dialogue_model_output_path, 'model_epoch{}'.format(epoch + 1))
+            model_path = join(args.lyric_model_output_path, 'model_epoch{}'.format(epoch + 1))
         if not os.path.exists(model_path):
             os.mkdir(model_path)
         model_to_save = model.module if hasattr(model, 'module') else model
@@ -389,8 +389,8 @@ def main():
     pad_id = tokenizer.convert_tokens_to_ids(PAD)
 
     # 创建对话模型的输出目录
-    if not os.path.exists(args.dialogue_model_output_path):
-        os.mkdir(args.dialogue_model_output_path)
+    if not os.path.exists(args.lyric_model_output_path):
+        os.mkdir(args.lyric_model_output_path)
     # 创建MMI模型的输出目录
     if not os.path.exists(args.mmi_model_output_path):
         os.mkdir(args.mmi_model_output_path)
@@ -420,7 +420,7 @@ def main():
     if args.train_mmi:  # 如果是训练MMI模型
         with open(args.train_mmi_tokenized_path, "r", encoding="utf8") as f:
             data = f.read()
-    else:  # 如果是训练对话生成模型
+    else:  # 如果是训练生成模型
         with open(args.train_tokenized_path, "r", encoding="utf8") as f:
             data = f.read()
     data_list = data.split("\n")
