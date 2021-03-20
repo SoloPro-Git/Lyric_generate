@@ -20,7 +20,7 @@ def clear_lyric(name, context):
         # line = line[10:]
         if line == '\n':
             continue
-        lyric_cleared += line.replace(' ','\n')
+        lyric_cleared += line.lstrip().replace(' ','\n')
     return lyric_cleared
 
 

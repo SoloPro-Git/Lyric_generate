@@ -119,15 +119,16 @@ def create_model(args, vocab_size):
     # 根据tokenizer的vocabulary调整GPT2模型的voca的大小
     model.resize_token_embeddings(vocab_size)
     logger.info('model config:\n{}'.format(model.config.to_json_string()))
-    return model, model.config.to_dict().get("n_ctx")
+    return model, model.config.to_dict().get("n_positions")
 
 
-def preprocess_raw_data(args, tokenizer, n_ctx, remember_lyric_len=3):
+def preprocess_raw_data(args, tokenizer, n_ctx, sentence_len=3):
     """
     对原始语料进行处理，将原始语料转换为用于train的token id，对于每首歌曲，将其处于成如下形式"[CLS]题目[SEP]句1[SEP]句2[SEP]句3[SEP]···"
     :param args:
     :param tokenizer:
     :param n_ctx:GPT2模型的上下文窗口大小,对于超过n_ctx(n_ctx包括了特殊字符)的dialogue进行截断
+    :param sentence_len:构造多少个句子为一条训练数据
     :return:
     """
     logger.info("tokenizing raw data,raw data path:{}, token output path:{}".format(args.train_raw_path,
@@ -135,27 +136,40 @@ def preprocess_raw_data(args, tokenizer, n_ctx, remember_lyric_len=3):
     with open(args.train_raw_path, 'rb') as f:
         data = f.read().decode("utf-8")
     if "-------\r\n" in data:
-        train_data = data.split("\r\n\r\n")
+        train_data = data.split("-------\r\n")
     else:
         train_data = data.split("\n\n")
-    logger.info("there are {} dialogue in raw dataset".format(len(train_data)))
+    logger.info("there are {} song in raw dataset".format(len(train_data)))
     with open(args.train_tokenized_path, "w", encoding="utf-8") as f:
-        for dialogue_index, dialogue in enumerate(tqdm(train_data)):
-            if "\r\n" in data:
-                utterances = dialogue.split("\r\n")
+        for song_index, song in enumerate(tqdm(train_data)):
+            if not song:
+                continue
+            if "\r\n" in song:
+                song_snetence = song.split("\r\n")
             else:
-                utterances = dialogue.split("\n")
-            dialogue_ids = [tokenizer.cls_token_id]  # 每个dialogue以[CLS]开头
-            for utterance in utterances:
-                dialogue_ids.extend([tokenizer.convert_tokens_to_ids(word) for word in utterance])
-                dialogue_ids.append(tokenizer.sep_token_id)  # 每个utterance之后添加[SEP]，表示utterance结束
-            # 对超过n_ctx的长度进行截断,否则GPT2模型会报错
-            dialogue_ids = dialogue_ids[:n_ctx]
-            for dialogue_id in dialogue_ids:
-                f.write(str(dialogue_id) + ' ')
-            # 最后一条记录不添加换行符
-            if dialogue_index < len(train_data) - 1:
-                f.write("\n")
+                song_snetence = song.split("\n")
+
+            song_name = song_snetence[0]  # 歌名单独拿出来
+            sentences = song_snetence[1:]
+
+            for index, _ in enumerate(sentences[:-sentence_len + 1]):
+                if not _:
+                    continue
+                snetence_id = [tokenizer.cls_token_id]  # 每条数据以[CLS]开头
+                snetence_id.extend([tokenizer.convert_tokens_to_ids(word) for word in song_name])  # 放入歌名
+                snetence_id.append(tokenizer.sep_token_id)
+                for next_sent_id in range(sentence_len):  # 这一句\下一句\下下一句
+                    snetence_id.extend(
+                        [tokenizer.convert_tokens_to_ids(word) for word in sentences[index + next_sent_id]])
+                    snetence_id.append(tokenizer.sep_token_id)  # 添加[SEP]，表示结束
+                # 对超过n_ctx的长度进行截断,否则GPT2模型会报错
+                snetence_id = snetence_id[:n_ctx]
+                if not sentences:
+                    continue
+                f.write(str(snetence_id)[1:-2])
+                # 最后一条记录不添加换行符
+                if song_index < len(train_data) - 1:
+                    f.write("\n")
     logger.info("finish preprocessing raw data,the result is stored in {}".format(args.train_tokenized_path))
 
 
@@ -277,8 +291,6 @@ def train(model, device, train_list, multi_gpu, args):
     for epoch in range(args.epochs):
         epoch_start_time = datetime.now()
         for batch_idx, input_ids in enumerate(train_dataloader):
-            if batch_idx == 1000:
-                break
             # 注意：GPT2模型的forward()函数，是对于给定的context，生成一个token，而不是生成一串token
             # GPT2Model的输入为n个token_id时，输出也是n个hidden_state，使用第n个hidden_state预测第n+1个token
             input_ids = input_ids.to(device)
@@ -347,8 +359,6 @@ def evaluate(model, device, test_list, multi_gpu, args):
                                  collate_fn=collate_fn)
     with torch.no_grad():
         for batch_idx, input_ids in enumerate(test_dataloader):
-            if batch_idx == 1000:
-                break
             input_ids.to(device)
             outputs = model.forward(input_ids=input_ids.to(device))
             loss, accuracy = calculate_loss_and_accuracy(outputs, labels=input_ids, device=device)

@@ -7,3 +7,4 @@ train.txt
 mmi_samples.txt
 *.bin
 .idea/
+tensorboard_summary/
