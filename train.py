@@ -45,7 +45,7 @@ def setup_train_args():
     parser.add_argument('--batch_size', default=8, type=int, required=False, help='训练batch size')
     parser.add_argument('--lr', default=1.5e-4, type=float, required=False, help='学习率')
     parser.add_argument('--warmup_steps', default=2000, type=int, required=False, help='warm up步数')
-    parser.add_argument('--log_step', default=10, type=int, required=False, help='多少步汇报一次loss')
+    parser.add_argument('--log_step', default=1, type=int, required=False, help='多少步汇报一次loss')
     parser.add_argument('--gradient_accumulation', default=1, type=int, required=False, help='梯度积累')
     parser.add_argument('--max_grad_norm', default=1.0, type=float, required=False)
     parser.add_argument('--lyric_model_output_path', default='lyric_model/', type=str, required=False,
@@ -164,9 +164,8 @@ def preprocess_raw_data(args, tokenizer, n_ctx, sentence_len=3):
                     snetence_id.append(tokenizer.sep_token_id)  # 添加[SEP]，表示结束
                 # 对超过n_ctx的长度进行截断,否则GPT2模型会报错
                 snetence_id = snetence_id[:n_ctx]
-                if not sentences:
-                    continue
-                f.write(str(snetence_id)[1:-2])
+                for each_id in snetence_id:
+                    f.write(str(each_id) + ' ')
                 # 最后一条记录不添加换行符
                 if song_index < len(train_data) - 1:
                     f.write("\n")
@@ -359,8 +358,8 @@ def evaluate(model, device, test_list, multi_gpu, args):
                                  collate_fn=collate_fn)
     with torch.no_grad():
         for batch_idx, input_ids in enumerate(test_dataloader):
-            input_ids.to(device)
-            outputs = model.forward(input_ids=input_ids.to(device))
+            input_ids = input_ids.to(device)
+            outputs = model.forward(input_ids=input_ids)
             loss, accuracy = calculate_loss_and_accuracy(outputs, labels=input_ids, device=device)
 
             if multi_gpu:
