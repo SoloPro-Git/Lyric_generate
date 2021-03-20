@@ -8,3 +8,4 @@ mmi_samples.txt
 *.bin
 .idea/
 tensorboard_summary/
+sample/samples.txt

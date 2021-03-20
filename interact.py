@@ -128,17 +128,17 @@ def main():
         if not os.path.exists(args.save_samples_path):
             os.makedirs(args.save_samples_path)
         samples_file = open(args.save_samples_path + '/samples.txt', 'a', encoding='utf8')
-        samples_file.write("聊天记录{}:\n".format(datetime.now()))
-        # 存储聊天记录，每个utterance以token的id的形式进行存储
+        samples_file.write("记录{}:\n".format(datetime.now()))
+        # 存储记录，每个utterance以token的id的形式进行存储
     history = []
-    print('开始和chatbot聊天，输入CTRL + Z以退出')
+    print('输入首句歌词')
 
     generate_len = 8
 
-    text = input("user:")
+    text = input("input:")
     for time in range(generate_len):
         if args.save_samples_path:
-            samples_file.write("user:{}\n".format(text))
+            samples_file.write("input:{}\n".format(text))
 
         # 记住生成歌词的最大长度，如果大于最大长度则删除第一句然后再添加 history :[set1,set2,set3,set4]
         if len(history) > args.max_history_len:
@@ -167,7 +167,7 @@ def main():
             filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=args.topk, top_p=args.topp)
             # torch.multinomial表示从候选集合中无放回地进行抽取num_samples个元素，权重越高，抽到的几率越高，返回元素的下标
             next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
-            if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(device):  # 遇到[SEP]则表明response生成结束
+            if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(device):  # 遇到[SEP]或者逗号则表明response生成结束
                 break
             generated.append(next_token.item())
             curr_input_tensor = torch.cat((curr_input_tensor, next_token), dim=0)
@@ -175,7 +175,7 @@ def main():
             # print("his_text:{}".format(his_text))
         # history.append(generated)
         text = tokenizer.convert_ids_to_tokens(generated)
-        print("chatbot:" + "".join(text))
+        print("bot:" + "".join(text))
         if args.save_samples_path:
             samples_file.write("chatbot:{}\n".format("".join(text)))
 
