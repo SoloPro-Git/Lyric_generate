@@ -136,25 +136,29 @@ def main():
     with open(args.load_form_path, "r", encoding="utf8") as f:
         data = f.read()
     data_list = data.split("\n")
-    song_name = data_list[0]
+    song_name = data_list[0].replace('歌名：','')
+    lyrics  = data_list[1:]
+    samples_file.write("歌名:{}\n".format(song_name))
 
     history = []
-    print('输入首句歌词')
 
-    generate_len = 8
-
-    text = input("input:")
-    for time in range(generate_len):
-        if args.save_samples_path:
-            samples_file.write("input:{}\n".format(text))
-
+    for lyric in lyrics:
+        # 如果本句不需要生成，就用已有句子代替
+        if '[]' not in lyric:
+            text = lyric
+            if args.save_samples_path:
+                samples_file.write("input:({})\n".format(text))
         # 记住生成歌词的最大长度，如果大于最大长度则删除第一句然后再添加 history :[set1,set2,set3,set4]
         if len(history) > args.max_history_len:
             history.pop(0)
             history.append([tokenizer.encode(text)])
         else:
             history.append([tokenizer.encode(text)])
-        input_ids = [tokenizer.cls_token_id]  # 每个input以[CLS]为开头
+
+        # 每个input以[CLS]歌名[sep]为开头
+        input_ids = [tokenizer.cls_token_id]
+        input_ids.extend(tokenizer.encode(song_name))
+        input_ids.append(tokenizer.sep_token_id)
 
         for his_setences in history:
             for setence in his_setences:
@@ -185,7 +189,7 @@ def main():
         text = tokenizer.convert_ids_to_tokens(generated)
         print("bot:" + "".join(text))
         if args.save_samples_path:
-            samples_file.write("chatbot:{}\n".format("".join(text)))
+            samples_file.write("bot:{}\n".format("".join(text)))
 
 
 if __name__ == '__main__':
