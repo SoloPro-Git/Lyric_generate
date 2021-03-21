@@ -164,10 +164,10 @@ def preprocess_raw_data(args, tokenizer, n_ctx, sentence_len=3):
                     snetence_id.append(tokenizer.sep_token_id)  # 添加[SEP]，表示结束
                 # 对超过n_ctx的长度进行截断,否则GPT2模型会报错
                 snetence_id = snetence_id[:n_ctx]
-                for each_id in snetence_id:
+                for each_id in snetence_id: # 写入一句话的id
                     f.write(str(each_id) + ' ')
                 # 最后一条记录不添加换行符
-                if song_index < len(train_data) - 1:
+                if song_index < len(train_data) - 1 or index < len(sentences[:-sentence_len + 1]) - 1:
                     f.write("\n")
     logger.info("finish preprocessing raw data,the result is stored in {}".format(args.train_tokenized_path))
 
@@ -292,9 +292,10 @@ def train(model, device, train_list, multi_gpu, args):
         for batch_idx, input_ids in enumerate(train_dataloader):
             # 注意：GPT2模型的forward()函数，是对于给定的context，生成一个token，而不是生成一串token
             # GPT2Model的输入为n个token_id时，输出也是n个hidden_state，使用第n个hidden_state预测第n+1个token
-            input_ids = input_ids.to(device)
+            # input_ids = input_ids.to(device)
             # 解决在运行过程中，由于显存不足产生的cuda out of memory的问题
             try:
+                input_ids = input_ids.to(device)
                 outputs = model.forward(input_ids=input_ids)
                 loss, accuracy = calculate_loss_and_accuracy(outputs, labels=input_ids, device=device)
 
@@ -331,7 +332,8 @@ def train(model, device, train_list, multi_gpu, args):
                         torch.cuda.empty_cache()
                 else:
                     logger.info(str(exception))
-                    raise exception
+                    logger.info(str(input_ids))
+                    # raise exception
         logger.info('saving model for epoch {}'.format(epoch + 1))
         if args.train_mmi:  # 当前训练MMI模型
             model_path = join(args.mmi_model_output_path, 'model_epoch{}'.format(epoch + 1))
@@ -435,7 +437,7 @@ def main():
         with open(args.train_tokenized_path, "r", encoding="utf8") as f:
             data = f.read()
     data_list = data.split("\n")
-    train_list, test_list = train_test_split(data_list, test_size=0.2, random_state=1)
+    train_list, test_list = train_test_split(data_list, test_size=0.1, random_state=1)
     # 开始训练
     train(model, device, train_list, multi_gpu, args)
     # 测试模型

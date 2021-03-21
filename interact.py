@@ -43,7 +43,8 @@ def set_interact_args():
                         help='选择词库')
     parser.add_argument('--model_path', default='chinese-lyric-gpt-pretrain-model/', type=str, required=False,
                         help='模型路径')
-    parser.add_argument('--save_samples_path', default="sample/", type=str, required=False, help="保存聊天记录的文件路径")
+    parser.add_argument('--save_samples_path', default="sample/", type=str, required=False, help="保存记录的文件路径")
+    parser.add_argument('--load_form_path', default="sample/form.txt", type=str, required=False, help="读取期望输入歌词格式的文件路径")
     parser.add_argument('--repetition_penalty', default=1.0, type=float, required=False,
                         help="重复惩罚参数，若生成的对话重复性较高，可适当提高该参数")
     parser.add_argument('--seed', type=int, default=None, help='设置种子用于生成随机数，以使得训练的结果是确定的')
@@ -130,6 +131,13 @@ def main():
         samples_file = open(args.save_samples_path + '/samples.txt', 'a', encoding='utf8')
         samples_file.write("记录{}:\n".format(datetime.now()))
         # 存储记录，每个utterance以token的id的形式进行存储
+
+    # 读取期望生成的歌词格式
+    with open(args.load_form_path, "r", encoding="utf8") as f:
+        data = f.read()
+    data_list = data.split("\n")
+    song_name = data_list[0]
+
     history = []
     print('输入首句歌词')
 
