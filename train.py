@@ -302,11 +302,12 @@ def train(model, device, train_list, multi_gpu, args):
                 batch_loss, batch_accuracy = calculate_loss_and_accuracy(outputs, labels=input_ids, device=device)
 
                 if multi_gpu:
-                    loss = batch_loss.mean()
-                    accuracy = batch_accuracy.mean()
-                if args.gradient_accumulation > 1:
-                    loss += batch_loss / args.gradient_accumulation
-                    accuracy += batch_accuracy / args.gradient_accumulation
+                    batch_loss = batch_loss.mean()
+                    batch_accuracy = batch_accuracy.mean()
+
+                loss += batch_loss / args.gradient_accumulation
+                accuracy += batch_accuracy / args.gradient_accumulation
+                
                 batch_loss.backward()
                 # 梯度裁剪解决的是梯度消失或爆炸的问题，即设定阈值
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
