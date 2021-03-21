@@ -284,8 +284,10 @@ def train(model, device, train_list, multi_gpu, args):
     overall_step = 0
     # 记录tensorboardX
     tb_writer = SummaryWriter(log_dir=args.writer_dir)
-    # 记录 out of memory的次数
+    # 记录 out of memory的次数 , 初始化loss和acc
     oom_time = 0
+    loss = 0
+    accuracy = 0
     # 开始训练
     for epoch in range(args.epochs):
         epoch_start_time = datetime.now()
@@ -297,15 +299,15 @@ def train(model, device, train_list, multi_gpu, args):
             try:
                 input_ids = input_ids.to(device)
                 outputs = model.forward(input_ids=input_ids)
-                loss, accuracy = calculate_loss_and_accuracy(outputs, labels=input_ids, device=device)
+                batch_loss, batch_accuracy = calculate_loss_and_accuracy(outputs, labels=input_ids, device=device)
 
                 if multi_gpu:
-                    loss = loss.mean()
-                    accuracy = accuracy.mean()
+                    loss = batch_loss.mean()
+                    accuracy = batch_accuracy.mean()
                 if args.gradient_accumulation > 1:
-                    loss = loss / args.gradient_accumulation
-                    accuracy = accuracy / args.gradient_accumulation
-                loss.backward()
+                    loss += batch_loss / args.gradient_accumulation
+                    accuracy += batch_accuracy / args.gradient_accumulation
+                batch_loss.backward()
                 # 梯度裁剪解决的是梯度消失或爆炸的问题，即设定阈值
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 # 进行一定step的梯度累计之后，更新参数
@@ -324,6 +326,8 @@ def train(model, device, train_list, multi_gpu, args):
                             "batch {} of epoch {}, loss {}, accuracy {}".format(batch_idx + 1, epoch + 1, loss,
                                                                                 accuracy))
                         tb_writer.add_scalar('loss', loss.item(), overall_step)
+                    loss = 0
+                    accuracy = 0
             except RuntimeError as exception:
                 if "out of memory" in str(exception):
                     oom_time += 1
