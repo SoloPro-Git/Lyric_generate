@@ -174,8 +174,10 @@ def main():
                 input_ids.append(tokenizer.sep_token_id)
         curr_input_tensor = torch.tensor(input_ids).long().to(device)
         generated = []
-        # 最多生成max_len个token
-        for _ in range(args.max_len):
+        token_ids = 1  # 生成的第 token_ids 个字
+        generated_backup = {}
+        # 最多生成next_sent_len+1个token
+        while token_ids <= next_sent_len + 1:
             outputs = model(input_ids=curr_input_tensor)
             next_token_logits = outputs[0][-1, :]
             # 对于已生成的结果generated中的每个token添加一个重复惩罚项，降低其生成概率
@@ -186,11 +188,18 @@ def main():
             next_token_logits[tokenizer.convert_tokens_to_ids('[UNK]')] = -float('Inf')
             filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=args.topk, top_p=args.topp)
             # torch.multinomial表示从候选集合中无放回地进行抽取num_samples个元素，权重越高，抽到的几率越高，返回元素的下标
-            next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
-            if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(device):  # 遇到[SEP]或者逗号则表明response生成结束
-                break
-            generated.append(next_token.item())
-            curr_input_tensor = torch.cat((curr_input_tensor, next_token), dim=0)
+            next_tokens = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=3)
+            generated_backup[token_ids+1] = next_tokens.copy()
+            if  next_sent_len - (token_ids + 1)   <= 0  :#如果生成的位置处于容许范围内，且没有sep
+                pass
+                # 删除当前backup的【0】元素，重新生成next token
+            for next_token in next_tokens:
+                next_token = next_token.unsqueeze(0)
+                if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(
+                        device):  # 遇到[SEP]或者逗号则表明response生成结束
+                    break
+                generated.append(next_token.item())
+                curr_input_tensor = torch.cat((curr_input_tensor, next_token), dim=0)
             # his_text = tokenizer.convert_ids_to_tokens(curr_input_tensor.tolist())
             # print("his_text:{}".format(his_text))
         # history.append(generated)
