@@ -1,0 +1,33 @@
+1、递归的从模型生成句子，不满意才回溯的话，会导致爆显存
+def geneerate_char(curlen, next_sent_len, bias_len: int, curr_input_tensor, cur_generated, maybe_generated,
+				   prob):
+	if curlen > next_sent_len + 1:
+		return
+	outputs = model(input_ids=curr_input_tensor)
+	next_token_logits = outputs[0][-1, :]
+	# 对于已生成的结果generated中的每个token添加一个重复惩罚项，降低其生成概率
+	for id in set(cur_generated):
+		next_token_logits[id] /= args.repetition_penalty
+	next_token_logits = next_token_logits / args.temperature
+	# 对于[UNK]的概率设为无穷小，也就是说模型的预测结果不可能是[UNK]这个token
+	next_token_logits[tokenizer.convert_tokens_to_ids('[UNK]')] = -float('Inf')
+	filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=args.topk, top_p=args.topp)
+	# torch.multinomial表示从候选集合中无放回地进行抽取num_samples个元素，权重越高，抽到的几率越高，返回元素的下标
+	logit_prob = F.softmax(filtered_logits, dim=-1)
+	next_tokens = torch.multinomial(logit_prob, num_samples=3)
+	for next_token in next_tokens:
+		next_token = next_token.unsqueeze(0)  # 还原维度，否则不能进行concat
+		cur_prob = prob * logit_prob[next_token.item()]
+		cur_generated.append(next_token.item())
+		if (next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(
+				device)) and math.fabs(
+			curlen - next_sent_len) <= bias_len:  # 遇到[SEP]或者逗号且要生成的句子长度在目标差bias_len个字范围内则表明response生成结束
+			maybe_generated.append([curlen - next_sent_len, cur_prob, cur_generated])  # [距离，当前概率值，最终可用的句子id]
+		else:
+			curr_input_tensor = torch.cat((curr_input_tensor, next_token), dim=0)
+
+			geneerate_char(curlen + 1, next_sent_len, bias_len, curr_input_tensor, cur_generated,
+						   maybe_generated,
+						   cur_prob)
+			cur_generated.pop()
+			curr_input_tensor = curr_input_tensor[:-1]

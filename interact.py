@@ -136,13 +136,21 @@ def main():
     with open(args.load_form_path, "r", encoding="utf8") as f:
         data = f.read()
     data_list = data.split("\n")
-    song_name = data_list[0].replace('歌名：','')
-    lyrics  = data_list[1:]
+    song_name = data_list[0].replace('歌名：', '')
+    lyrics = data_list[1:]
     samples_file.write("歌名:{}\n".format(song_name))
 
     history = []
 
-    for lyric in lyrics:
+    for lyric_ids, lyric in enumerate(lyrics):
+
+        # 如果下一句是非空，则本句话不用生成下一句，直接跳过
+        if '[]' not in lyrics[lyric_ids + 1]:
+            continue
+        else:
+            # 获得下一句要生成多少个字
+            next_sent_len = len(lyrics[lyric_ids + 1]) / 2
+
         # 如果本句不需要生成，就用已有句子代替
         if '[]' not in lyric:
             text = lyric
@@ -155,7 +163,7 @@ def main():
         else:
             history.append([tokenizer.encode(text)])
 
-        # 每个input以[CLS]歌名[sep]为开头
+        # 每个input以  [CLS]歌名[sep]为开头
         input_ids = [tokenizer.cls_token_id]
         input_ids.extend(tokenizer.encode(song_name))
         input_ids.append(tokenizer.sep_token_id)

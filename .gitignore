@@ -9,3 +9,4 @@ mmi_samples.txt
 .idea/
 tensorboard_summary/
 sample/samples.txt
+lyric_model/
