@@ -32,7 +32,7 @@ def set_interact_args():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--device', default='0', type=str, required=False, help='生成设备')
-    parser.add_argument('--temperature', default=1, type=float, required=False, help='生成的temperature')
+    parser.add_argument('--temperature', default=1.5, type=float, required=False, help='生成的temperature,越大随意度越高')
     parser.add_argument('--topk', default=8, type=int, required=False, help='最高k选1')
     parser.add_argument('--topp', default=0, type=float, required=False, help='最高积累概率')
     parser.add_argument('--model_config', default='chinese-lyric-gpt-pretrain-model/config.txt', type=str,
@@ -156,37 +156,19 @@ def main():
             # 获得下一句要生成多少个字
             next_sent_len = len(lyrics[lyric_ids + 1]) / 2 + 1
 
-        # 记住生成歌词的最大长度，如果大于最大长度则删除第一句然后再添加 history :[set1,set2,set3,set4]
-        if len(history) > args.max_history_len:
-            history.pop(0)
-            history.append([tokenizer.encode(text)])
-        else:
-            history.append([tokenizer.encode(text)])
-
-        # 每个input以  [CLS]歌名[sep]为开头
-        input_ids = [tokenizer.cls_token_id]
-        input_ids.extend(tokenizer.encode(song_name))
-        input_ids.append(tokenizer.sep_token_id)
-
-        # 把历史放入当前的input中
-        for his_setences in history:
-            for setence in his_setences:
-                input_ids.extend(setence)
-                input_ids.append(tokenizer.sep_token_id)
-
-        curr_input_tensor = torch.tensor(input_ids).long().to(device)
         def find_len_generate(curr_input_tensor):
+            # 按照指定长度生成
             generated = []
             maybe_generated = []
             gen_times = 0  # 当前生成次数
-            max_gen_times = 100  # 最大尝试次数
+            max_gen_times = 500  # 最大尝试次数
             token_ids = 1  # 生成的第 token_ids 个字
             generated_backup = {}
             direction = 1  # 生成字的方向 ,1是正向 -1是反向
             # 最多生成next_sent_len+1个token
             while 0 < token_ids <= next_sent_len + 1 and gen_times <= max_gen_times:
                 gen_times += 1
-                print(lyric_ids, gen_times)
+                # print(lyric_ids, gen_times)
                 # 如果当前的 生成备选中没有 token_ids 的备选字，且为正向 则生成
                 if (token_ids not in generated_backup or generated_backup[token_ids].size()[0] == 0) and direction == 1:
                     outputs = model(input_ids=curr_input_tensor.to(device))
@@ -255,31 +237,59 @@ def main():
                 # print("his_text:{}".format(his_text))
             # history.append(generated)
             return generated
+
+        def free_generate(curr_input_tensor,temperature):
+            # 自由生成
+            generated = []
+            # 最多生成max_len个token
+            for _ in range(args.max_len):
+                outputs = model(input_ids=curr_input_tensor)
+                next_token_logits = outputs[0][-1, :]
+                # 对于已生成的结果generated中的每个token添加一个重复惩罚项，降低其生成概率
+                for id in set(generated):
+                    next_token_logits[id] /= args.repetition_penalty
+                next_token_logits = next_token_logits / temperature
+                # 对于[UNK]的概率设为无穷小，也就是说模型的预测结果不可能是[UNK]这个token
+                next_token_logits[tokenizer.convert_tokens_to_ids('[UNK]')] = -float('Inf')
+                filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=args.topk, top_p=args.topp)
+                # torch.multinomial表示从候选集合中无放回地进行抽取num_samples个元素，权重越高，抽到的几率越高，返回元素的下标
+                next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
+                if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(
+                        device):  # 遇到[SEP]则表明response生成结束
+                    break
+                generated.append(next_token.item())
+                curr_input_tensor = torch.cat((curr_input_tensor, next_token), dim=0)
+            return generated
+
+        # 记住生成歌词的最大长度，如果大于最大长度则删除第一句然后再添加 history :[set1,set2,set3,set4]
+        if len(history) > args.max_history_len:
+            history.pop(0)
+            history.append([tokenizer.encode(text)])
+        else:
+            history.append([tokenizer.encode(text)])
+
+        # 每个input以  [CLS]歌名[sep]为开头
+        input_ids = [tokenizer.cls_token_id]
+        input_ids.extend(tokenizer.encode(song_name))
+        input_ids.append(tokenizer.sep_token_id)
+
+        # 把历史放入当前的input中
+        for his_setences in history:
+            for setence in his_setences:
+                input_ids.extend(setence)
+                input_ids.append(tokenizer.sep_token_id)
+
+        curr_input_tensor = torch.tensor(input_ids).long().to(device)
+
         generated = find_len_generate(curr_input_tensor)
         # 当不满足要求则自由生成
         if len(generated) != next_sent_len - 1:
-            def free_generate(curr_input_tensor):
-                generated = []
-                # 最多生成max_len个token
-                for _ in range(args.max_len):
-                    outputs = model(input_ids=curr_input_tensor)
-                    next_token_logits = outputs[0][-1, :]
-                    # 对于已生成的结果generated中的每个token添加一个重复惩罚项，降低其生成概率
-                    for id in set(generated):
-                        next_token_logits[id] /= args.repetition_penalty
-                    next_token_logits = next_token_logits / args.temperature
-                    # 对于[UNK]的概率设为无穷小，也就是说模型的预测结果不可能是[UNK]这个token
-                    next_token_logits[tokenizer.convert_tokens_to_ids('[UNK]')] = -float('Inf')
-                    filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=args.topk, top_p=args.topp)
-                    # torch.multinomial表示从候选集合中无放回地进行抽取num_samples个元素，权重越高，抽到的几率越高，返回元素的下标
-                    next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
-                    if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(
-                            device):  # 遇到[SEP]则表明response生成结束
-                        break
-                    generated.append(next_token.item())
-                    curr_input_tensor = torch.cat((curr_input_tensor, next_token), dim=0)
-                return generated
-        generated = free_generate(curr_input_tensor)
+            temperature = args.temperature
+            generated = free_generate(curr_input_tensor,temperature)
+            # 当生成失败的时候不断调大temperature让模型更加不稳定
+            while not generated:
+                temperature += 0.2
+                generated = free_generate(curr_input_tensor,temperature)
         text = tokenizer.convert_ids_to_tokens(generated)
         print("bot:" + "".join(text))
         if args.save_samples_path:
