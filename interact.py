@@ -143,19 +143,19 @@ def main():
     history = []
 
     for lyric_ids, lyric in enumerate(lyrics):
-
-        # 如果下一句是非空，则本句话不用生成下一句，直接跳过
-        if '[]' not in lyrics[lyric_ids + 1]:
-            continue
-        else:
-            # 获得下一句要生成多少个字
-            next_sent_len = len(lyrics[lyric_ids + 1]) / 2
-
         # 如果本句不需要生成，就用已有句子代替
         if '[]' not in lyric:
             text = lyric
             if args.save_samples_path:
                 samples_file.write("input:({})\n".format(text))
+
+        # 如果已经是最后一句了，或者下一句是非空，则本句话不用生成下一句，直接跳过
+        if lyric_ids == len(lyrics) - 1 or '[]' not in lyrics[lyric_ids + 1]:
+            continue
+        else:
+            # 获得下一句要生成多少个字
+            next_sent_len = len(lyrics[lyric_ids + 1]) / 2 + 1
+
         # 记住生成歌词的最大长度，如果大于最大长度则删除第一句然后再添加 history :[set1,set2,set3,set4]
         if len(history) > args.max_history_len:
             history.pop(0)
@@ -175,79 +175,111 @@ def main():
                 input_ids.append(tokenizer.sep_token_id)
 
         curr_input_tensor = torch.tensor(input_ids).long().to(device)
-        generated = []
-        maybe_generated = []
-        gen_times = 1 # 当前生成次数
-        max_gen_times = 100 # 最大尝试次数
-        token_ids = 1  # 生成的第 token_ids 个字
-        generated_backup = {}
-        direction = 1  # 生成字的方向 ,1是正向 -1是反向
-        # 最多生成next_sent_len+1个token
-        while 0 < token_ids <= next_sent_len + 1 or gen_times > max_gen_times:
-
-            # 如果当前的 生成备选中没有 token_ids 的备选字，且为正向 则生成
-            if (token_ids not in generated_backup or not generated_backup[token_ids]) and direction == 1:
-                outputs = model(input_ids=curr_input_tensor)
-                next_token_logits = outputs[0][-1, :]
-                # 对于已生成的结果generated中的每个token添加一个重复惩罚项，降低其生成概率
-                for id in set(generated):
-                    next_token_logits[id] /= args.repetition_penalty
-                next_token_logits = next_token_logits / args.temperature
-                # 对于[UNK]的概率设为无穷小，也就是说模型的预测结果不可能是[UNK]这个token
-                next_token_logits[tokenizer.convert_tokens_to_ids('[UNK]')] = -float('Inf')
-                filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=args.topk, top_p=args.topp)
-                # torch.multinomial表示从候选集合中无放回地进行抽取num_samples个元素，权重越高，抽到的几率越高，返回元素的下标
-                next_tokens = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=3)
-                generated_backup[token_ids] = next_tokens.copy()  # 放入到备选池 {1:[tk1,tk2,tk3],2:[tk4,tk5]}
-
-            # 如果当前要生成的位置有备选字，则拿一个出来
-            elif generated_backup[token_ids]:
-                pass
-
-            # 如果方向是负向 且当前备选为空 则说明 token_ids -1 位置的 0 元素已经生成完 要到前一个位置新拿一个
-            elif (token_ids not in generated_backup or not generated_backup[token_ids]) and direction == -1:
-                token_ids -= 1
-                generated = generated[:-1]
-                direction = -1
+        def find_len_generate(curr_input_tensor):
+            generated = []
+            maybe_generated = []
+            gen_times = 0  # 当前生成次数
+            max_gen_times = 100  # 最大尝试次数
+            token_ids = 1  # 生成的第 token_ids 个字
+            generated_backup = {}
+            direction = 1  # 生成字的方向 ,1是正向 -1是反向
+            # 最多生成next_sent_len+1个token
+            while 0 < token_ids <= next_sent_len + 1 and gen_times <= max_gen_times:
                 gen_times += 1
-                continue
+                print(lyric_ids, gen_times)
+                # 如果当前的 生成备选中没有 token_ids 的备选字，且为正向 则生成
+                if (token_ids not in generated_backup or generated_backup[token_ids].size()[0] == 0) and direction == 1:
+                    outputs = model(input_ids=curr_input_tensor.to(device))
+                    next_token_logits = outputs[0][-1, :]
+                    # 对于已生成的结果generated中的每个token添加一个重复惩罚项，降低其生成概率
+                    for id in set(generated):
+                        next_token_logits[id] /= args.repetition_penalty
+                    next_token_logits = next_token_logits / args.temperature
+                    # 对于[UNK]的概率设为无穷小，也就是说模型的预测结果不可能是[UNK]这个token
+                    next_token_logits[tokenizer.convert_tokens_to_ids('[UNK]')] = -float('Inf')
+                    next_token_logits[tokenizer.convert_tokens_to_ids('[PAD]')] = -float('Inf')
+                    filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=args.topk, top_p=args.topp)
+                    # torch.multinomial表示从候选集合中无放回地进行抽取num_samples个元素，权重越高，抽到的几率越高，返回元素的下标
+                    next_tokens = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=3)
+                    generated_backup[token_ids] = next_tokens  # 放入到备选池 {1:[tk1,tk2,tk3],2:[tk4,tk5]}
 
-            # 当行进到要生成到长度到时候
-            if token_ids == next_sent_len:
-                # 遍历最后一次生成到所有元素直到找到[SEP]
-                for next_token in generated_backup[token_ids]:
-                    next_token = next_token.unsqueeze(0)
-                    if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(
-                            device):  # 遇到[SEP]或者逗号则表明response生成结束
-                        generated.append(next_token.item())
-                        break
-                # 长度满足则跳出大到while循环
-                if len(generated) == next_sent_len:
-                    break
-                else:
+                # 如果当前要生成的位置有备选字，则拿一个出来
+                elif generated_backup[token_ids].size()[0] != 0:
+                    pass
+
+                # 如果方向是负向 且当前备选为空 则说明 token_ids -1 位置的 0 元素已经生成完 要到前一个位置新拿一个
+                elif (token_ids not in generated_backup or generated_backup[token_ids].size()[0] == 0) and direction == -1:
                     token_ids -= 1
                     generated = generated[:-1]
                     direction = -1
-                    gen_times += 1
                     continue
-            # 取出一个token 并且删除backup里面到第一个元素
-            next_token = generated_backup[token_ids][0].unsqueeze(0)
-            generated_backup[token_ids] = generated_backup[token_ids][1:]
 
-            generated.append(next_token.item())
-            curr_input_tensor = torch.cat((curr_input_tensor, next_token), dim=0)
+                # 当行进到要生成到长度到时候
+                if token_ids == next_sent_len:
+                    is_fin = 0
+                    # 遍历最后一次生成到所有元素直到找到[SEP]
+                    for next_token in generated_backup[token_ids]:
+                        next_token = next_token.unsqueeze(0)
+                        if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(
+                                device):  # 遇到[SEP]或者逗号则表明response生成结束
+                            is_fin = 1
+                            break
+                    # 长度满足则跳出大到while循环
+                    if is_fin == 1:
+                        break
+                    else:
+                        token_ids -= 1
+                        generated = generated[:-1]
+                        direction = -1
+                        continue
+                # 取出一个token 并且删除backup里面到第一个元素
+                next_token = generated_backup[token_ids][0].unsqueeze(0)
+                generated_backup[token_ids] = generated_backup[token_ids][1:]
+                # 意味着当前只有一个最佳答案，其他两个抽样都是无效结果，忽略
+                if next_token.item() == 0 or next_token.item() == 1:
+                    continue
+                # 当需要生成的句子中含有，或者[SEP]，忽略
+                elif (next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(
+                        device)) and token_ids < next_sent_len:
+                    continue
 
-            if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(
-                    device):  # （兜底）遇到[SEP]或者逗号则表明response生成结束,把可能用到到结果存起来，如果生成不到满足条件就拿一个用
-                maybe_generated.append(generated)
-            token_ids += 1
-            direction = 1
-            gen_times += 1
-            # his_text = tokenizer.convert_ids_to_tokens(curr_input_tensor.tolist())
-            # print("his_text:{}".format(his_text))
-        # history.append(generated)
-        if len(generated) != next_sent_len:
-            generated = maybe_generated[0]
+                generated.append(next_token.item())
+                curr_input_tensor = torch.cat((curr_input_tensor, next_token), dim=0)
+
+                if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(
+                        device):  # （兜底）遇到[SEP]或者逗号则表明response生成结束,把可能用到到结果存起来，如果生成不到满足条件就拿一个用
+                    maybe_generated.append(generated)
+                token_ids += 1
+                direction = 1
+                # his_text = tokenizer.convert_ids_to_tokens(curr_input_tensor.tolist())
+                # print("his_text:{}".format(his_text))
+            # history.append(generated)
+            return generated
+        generated = find_len_generate(curr_input_tensor)
+        # 当不满足要求则自由生成
+        if len(generated) != next_sent_len - 1:
+            def free_generate(curr_input_tensor):
+                generated = []
+                # 最多生成max_len个token
+                for _ in range(args.max_len):
+                    outputs = model(input_ids=curr_input_tensor)
+                    next_token_logits = outputs[0][-1, :]
+                    # 对于已生成的结果generated中的每个token添加一个重复惩罚项，降低其生成概率
+                    for id in set(generated):
+                        next_token_logits[id] /= args.repetition_penalty
+                    next_token_logits = next_token_logits / args.temperature
+                    # 对于[UNK]的概率设为无穷小，也就是说模型的预测结果不可能是[UNK]这个token
+                    next_token_logits[tokenizer.convert_tokens_to_ids('[UNK]')] = -float('Inf')
+                    filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=args.topk, top_p=args.topp)
+                    # torch.multinomial表示从候选集合中无放回地进行抽取num_samples个元素，权重越高，抽到的几率越高，返回元素的下标
+                    next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
+                    if next_token == tokenizer.sep_token_id or next_token == torch.tensor(tokenizer.encode('，')).to(
+                            device):  # 遇到[SEP]则表明response生成结束
+                        break
+                    generated.append(next_token.item())
+                    curr_input_tensor = torch.cat((curr_input_tensor, next_token), dim=0)
+                return generated
+        generated = free_generate(curr_input_tensor)
         text = tokenizer.convert_ids_to_tokens(generated)
         print("bot:" + "".join(text))
         if args.save_samples_path:
